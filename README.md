@@ -57,7 +57,7 @@ nbds_max和max_part参数只有在nbd模块驱动没有加载情况下才会生�
 
 ### 四、目录树说明
 
-.
+```
 ├── BUILD                                   #BAZEL BUILD文件
 ├── ImageInstance.cpp                       #封装后端文件操作接口实现，基于libnebd实现
 ├── ImageInstance.h                         #封装后端文件操作接口
@@ -83,3 +83,4 @@ nbds_max和max_part参数只有在nbd模块驱动没有加载情况下才会生�
 ├── texttable.h                             #格式化list结果输出相关接口
 ├── util.cpp                                #公共辅助接口实现
 └── util.h                                  #公共辅助接口
+```
