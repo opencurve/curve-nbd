@@ -176,10 +176,7 @@ int IOController::SetUp(NBDConfig* config,
     if (ret < 0) {
         dout << "curve-nbd: failed to map, status: "
              << cpp_strerror(ret) << std::endl;
-        ioctl(nbdFd_, NBD_CLEAR_SOCK);
-        close(nbdFd_);
-        nbdFd_ = -1;
-        nbdIndex_ = -1;
+        ClearUp();
         return ret;
     }
 
