@@ -41,8 +41,12 @@
 namespace curve {
 namespace nbd {
 
-std::shared_ptr<NBDTool> nbdTool;
-std::shared_ptr<NBDConfig> nbdConfig;
+namespace {
+
+NBDConfig nbdConfig;
+std::unique_ptr<NBDTool> nbdTool;
+
+}  // namespace
 
 static std::string Version() {
     static const std::string version =
@@ -65,7 +69,7 @@ static void HandleSignal(int signum) {
     dout << "Got signal " << strsignal(signum) << "\n"
               << ", disconnect now" << std::endl;
 
-    ret = nbdTool->Disconnect(nbdConfig.get());
+    ret = nbdTool->Disconnect(&nbdConfig);
     if (ret != 0) {
         dout << "curve-nbd: disconnect failed. Error: " << ret
                   << std::endl;
@@ -92,29 +96,42 @@ static void Usage() {
         << "Unmap options:\n"
         << "  -f, --force                 Force unmap even if the device is mounted\n"              // NOLINT
         << "  --retry_times <limit>       The number of retries waiting for the process to exit\n"  // NOLINT
-        << "                              (default: " << nbdConfig->retry_times << ")\n"            // NOLINT
+        << "                              (default: " << nbdConfig.retry_times << ")\n"            // NOLINT
         << "  --sleep_ms <milliseconds>   Retry interval in milliseconds\n"                         // NOLINT
-        << "                              (default: " << nbdConfig->sleep_ms << ")\n"               // NOLINT
+        << "                              (default: " << nbdConfig.sleep_ms << ")\n"               // NOLINT
         << std::endl;
 }
 
 // use for record image and device info to auto map when boot
 static int AddRecord(int flag) {
     std::string record;
-    int fd = open(CURVETAB_PATH, O_WRONLY | O_APPEND);
+    int fd = open(CURVETAB_PATH, O_WRONLY | O_APPEND | O_CREAT, 0644);
     if (fd < 0) {
         std::cerr << "curve-nbd: open curvetab file failed, error: "
                   << strerror(errno);
         return -EINVAL;
     }
     if (1 == flag) {
-        record = "+\t" + nbdConfig->devpath + "\t" + nbdConfig->imgname + "\t" +
-                 nbdConfig->MapOptions() + "\n";
+        record = "+\t" + nbdConfig.devpath + "\t" + nbdConfig.imgname + "\t" +
+                 nbdConfig.MapOptions() + "\n";
     } else if (-1 == flag) {
-        record = "-\t" + nbdConfig->devpath + "\n";
+        record = "-\t" + nbdConfig.devpath + "\n";
+    } else {
+        return -EINVAL;
     }
+
     auto nr = ::write(fd, record.c_str(), record.size());
-    (void)nr;
+    if (nr != static_cast<ssize_t>(record.size())) {
+        std::cerr << "write curvetab file failed, error: " << strerror(errno)
+                  << std::endl;
+        return -1;
+    }
+
+    if (0 != fsync(fd)) {
+        std::cerr << "fsync failed, error: " << strerror(errno) << std::endl;
+        return -1;
+    }
+
     close(fd);
     return 0;
 }
@@ -160,7 +177,7 @@ static int NBDConnect() {
     signal(SIGTERM, HandleSignal);
     signal(SIGINT, HandleSignal);
 
-    int ret = nbdTool->Connect(nbdConfig.get());
+    int ret = nbdTool->Connect(&nbdConfig);
     int connectionRes = -1;
     if (ret < 0) {
         auto nr =
@@ -187,11 +204,10 @@ static int CurveNbdMain(int argc, const char* argv[]) {
     std::ostringstream errMsg;
     std::vector<const char*> args;
 
-    nbdConfig = std::make_shared<NBDConfig>();
-    nbdTool = std::make_shared<NBDTool>();
+    nbdTool.reset(new NBDTool{});
 
     argv_to_vec(argc, argv, args);
-    r = parse_args(args, &errMsg, &command, nbdConfig.get());
+    r = parse_args(args, &errMsg, &command, &nbdConfig);
 
     if (r == HELP_INFO) {
         Usage();
@@ -206,7 +222,7 @@ static int CurveNbdMain(int argc, const char* argv[]) {
 
     switch (command) {
         case Command::Connect: {
-            if (nbdConfig->imgname.empty()) {
+            if (nbdConfig.imgname.empty()) {
                 std::cerr << "curve-nbd: image name was not specified"
                           << std::endl;
                 return -EINVAL;
@@ -220,7 +236,7 @@ static int CurveNbdMain(int argc, const char* argv[]) {
             break;
         }
         case Command::Disconnect: {
-            r = nbdTool->Disconnect(nbdConfig.get());
+            r = nbdTool->Disconnect(&nbdConfig);
             if (r < 0) {
                 return -EINVAL;
             }
@@ -248,7 +264,6 @@ static int CurveNbdMain(int argc, const char* argv[]) {
     }
 
     nbdTool.reset();
-    nbdConfig.reset();
 
     return 0;
 }
